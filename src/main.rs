@@ -11,23 +11,36 @@ const U32MAX: u64 = 2_u64.pow(32);
 
 impl Pair {
     fn encode(&self) -> Vec<u8> {
-        /* let mut bytes: Vec<u8> = match self.index {
+        let bit_count: u8 = match self.index {
+            0..U8MAX => 8,
+            U8MAX..U16MAX => 16,
+            U16MAX..U32MAX => 32,
+            U32MAX..=u64::MAX => 64,
+        };
+        let mut encoded_bytes = Vec::with_capacity((bit_count / 8 + 2) as usize);
+        encoded_bytes.push(bit_count);
+
+        let bytes = match self.index {
             0..U8MAX => (self.index as u8).to_be_bytes().to_vec(),
             U8MAX..U16MAX => (self.index as u16).to_be_bytes().to_vec(),
             U16MAX..U32MAX => (self.index as u32).to_be_bytes().to_vec(),
             U32MAX..=u64::MAX => self.index.to_be_bytes().to_vec(),
-        }; */
+        };
 
-        let mut bytes: Vec<u8> = self.index.to_be_bytes().to_vec();
+        encoded_bytes.extend(bytes);
+
         if let Some(byte) = self.symbol {
-            bytes.push(byte);
+            encoded_bytes.push(byte);
         }
-        bytes
+        encoded_bytes
     }
 }
 
 fn main() {
-    encode(Path::new("./TestFiles/test2.txt"), Path::new("output.lz78"));
+    /* encode(Path::new("./TestFiles/test1.txt"), Path::new("output.lz78"));
+    decode(Path::new("output.lz78"), Path::new("./TestFiles/test1Decoded.txt")); */
+    encode(Path::new("./Screenshot.bmp"), Path::new("Screenshot.lz78"));
+    decode(Path::new("Screenshot.lz78"), Path::new("./ScreenshotDecoded.bmp"));
 }
 
 fn encode(input: &Path, output: &Path) {
@@ -56,12 +69,55 @@ fn encode(input: &Path, output: &Path) {
 
     if buffer.len() > 0 { //EOF
         let index = dictionary[&buffer];
-        writer.write_all(&index.to_be_bytes()).unwrap();
+        let pair = Pair { index, symbol: None };
+        writer.write_all(&pair.encode()).unwrap();
     }
 
     writer.flush().unwrap();
 }
 
-fn decode() {
+fn decode(input: &Path, output: &Path) {
+    let input_file = File::open(input).unwrap();
+    let mut reader = BufReader::new(input_file);
+
+    let output_file = File::create(output).unwrap();
+    let mut writer = BufWriter::new(output_file);
+
+    let mut dictionary: Vec<Vec<u8>> = Vec::new();
+
+    loop {
+        let mut buf = [0u8; 1];
+        if let Err(_) = reader.read_exact(&mut buf) {
+            break;
+        };
+        let bit_count = buf[0];
+        let mut buf = vec![0u8; (bit_count / 8) as usize];
+        reader.read_exact(&mut buf).unwrap();
+
+        let index = match bit_count {
+            8 => u8::from_be_bytes(buf[..].try_into().unwrap()) as u64,
+            16 => u16::from_be_bytes(buf[..].try_into().unwrap()) as u64,
+            32 => u32::from_be_bytes(buf[..].try_into().unwrap()) as u64,
+            64 => u64::from_be_bytes(buf[..].try_into().unwrap()),
+            _ => panic!("Something went horribly wrong {}", bit_count),
+        };
+        let mut buf = [0u8; 1];
+        let symbol = if let Ok(_) = reader.read_exact(&mut buf) { Some(buf[0]) } else { None };
+
+        let mut buffer = Vec::new();
+        if index > 0 {
+            buffer.extend(&dictionary[index as usize - 1]);
+        }
+        
+        if let Some(symbol) = symbol {
+            buffer.push(symbol);
+        }
+
+        writer.write_all(&buffer).unwrap();
+
+        dictionary.push(buffer);
+    }
+
+    writer.flush().unwrap();
 
 }
