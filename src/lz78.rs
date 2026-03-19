@@ -109,11 +109,11 @@ pub fn decode(input: &Path, output: &Path) {
             buffer.push(symbol);
         }
 
-        writer.write_all(&buffer).expect("Failed to finish writing the output file");
+        writer.write_all(&buffer).expect("Failed to write buffer to file");
 
         dictionary.push(buffer);
     }
 
-    writer.flush().unwrap();
+    writer.flush().expect("Failed to finish writing the output file");
 
 }
