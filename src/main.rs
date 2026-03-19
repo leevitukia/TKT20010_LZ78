@@ -1,6 +1,6 @@
 use std::path::Path;
 mod lz78;
-
+mod huffman;
 
 fn main() {
     lz78::encode(Path::new("./TestFiles/test1.txt"), Path::new("output.lz78"));
