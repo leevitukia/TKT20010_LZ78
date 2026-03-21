@@ -3,4 +3,11 @@ name = "TKT20010_LZ78"
 version = "0.1.0"
 edition = "2024"
 
+
+[profile.test]
+opt-level = 1
+
 [dependencies]
+anyhow = "1.0.102"
+rand = "0.10.0"
+tempfile = "3.27.0"

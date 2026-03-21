@@ -42,8 +42,19 @@ pub fn encode(input: &Path, output: &Path) {
     for kvp in frequencies{
         prio_queue.push(Reverse(Node::Leaf { symbol: kvp.0, freq: kvp.1 }));
     }
-    
 
+    while prio_queue.len() > 1 {
+        let left_node = Box::new(prio_queue.pop().unwrap().0);
+        let right_node = Box::new(prio_queue.pop().unwrap().0);
+
+        let new_node = Node::Internal { freq: left_node.freq() + right_node.freq(), left: left_node, right: right_node };
+
+        prio_queue.push(Reverse(new_node));
+    }
+
+    let root = prio_queue.pop().unwrap().0;
+
+    todo!()
 }
 
 pub fn decode(input: &Path, output: &Path) {

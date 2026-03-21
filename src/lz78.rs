@@ -1,7 +1,9 @@
 use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter, Read, Write}, path::Path};
 
 struct Pair {
+    /// The index of the longest matching prefix in the dictionary
     index: u64,
+    /// The symbol that broke the buffer, only None if the last buffer was in the dictionary
     symbol: Option<u8>,
 }
 
@@ -10,6 +12,11 @@ const U16MAX: u64 = 2_u64.pow(16);
 const U32MAX: u64 = 2_u64.pow(32);
 
 impl Pair {
+    fn new(index: u64, symbol: Option<u8>) -> Self {
+        Self {index, symbol}
+    }
+
+    /// Encodes the pair to a form where it can be written to file in a somewhat compressed form
     fn encode(&self) -> Vec<u8> {
         let bit_count: u8 = match self.index {
             0..U8MAX => 8,
@@ -36,7 +43,7 @@ impl Pair {
     }
 }
 
-
+/// This method takes the input file and saves a version compressed with the LZ78 algorithm to the output path
 pub fn encode(input: &Path, output: &Path) {
     let input_file = File::open(input).unwrap();
     let reader = BufReader::new(input_file);
@@ -70,8 +77,7 @@ pub fn encode(input: &Path, output: &Path) {
     writer.flush().unwrap();
 }
 
-
-
+/// This method takes a file that was compressed with the LZ78 algorithm and decodes it to the output path
 pub fn decode(input: &Path, output: &Path) {
     let input_file = File::open(input).unwrap();
     let mut reader = BufReader::new(input_file);
@@ -90,13 +96,14 @@ pub fn decode(input: &Path, output: &Path) {
         let mut buf = vec![0u8; (bit_count / 8) as usize];
         reader.read_exact(&mut buf).expect("Failed to read the bit count header");
 
-        let index = match bit_count {
+        let index = match bit_count {  //
             8 => u8::from_be_bytes(buf[..].try_into().unwrap()) as u64,
             16 => u16::from_be_bytes(buf[..].try_into().unwrap()) as u64,
             32 => u32::from_be_bytes(buf[..].try_into().unwrap()) as u64,
             64 => u64::from_be_bytes(buf[..].try_into().unwrap()),
             _ => panic!("Something went horribly wrong {}", bit_count),
         };
+
         let mut buf = [0u8; 1];
         let symbol = if let Ok(_) = reader.read_exact(&mut buf) { Some(buf[0]) } else { None };
 
@@ -117,3 +124,6 @@ pub fn decode(input: &Path, output: &Path) {
     writer.flush().expect("Failed to finish writing the output file");
 
 }
+
+#[cfg(test)]
+mod tests;
