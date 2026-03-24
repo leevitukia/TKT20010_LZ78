@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter, Read, Write}, path::Path};
+use std::{fs::File, io::{BufReader, BufWriter, Read, Write}, path::Path};
+
+use ahash::AHashMap;
 
 struct Pair {
     /// The index of the longest matching prefix in the dictionary
@@ -51,25 +53,25 @@ pub fn encode(input: &Path, output: &Path) {
     let output_file = File::create(output).unwrap();
     let mut writer = BufWriter::new(output_file);
 
-    let mut dictionary: HashMap<Vec<u8>, u64> = HashMap::new();
+    let mut dictionary: AHashMap<Box<[u8]>, u64> = AHashMap::new();
     let mut buffer: Vec<u8> = Vec::new();
     let mut index: u64 = 0;
 
     for byte in reader.bytes() {
         let b = byte.unwrap();
-        let prev_index = if buffer.len() > 0 {dictionary[&buffer]} else {0};
+        let prev_index = if buffer.len() > 0 {dictionary[buffer.as_slice()]} else {0};
         buffer.push(b);
-        if !dictionary.contains_key(&buffer) {
+        if !dictionary.contains_key(buffer.as_slice()) {
             index += 1;
-            dictionary.insert(buffer, index);
-            buffer = Vec::new();
+            dictionary.insert(buffer.clone().into_boxed_slice(), index);
+            buffer.clear();
             let pair = Pair {index: prev_index, symbol: Some(b)};
             writer.write_all(&pair.encode()).unwrap();
         }
     }
 
     if buffer.len() > 0 { //EOF
-        let index = dictionary[&buffer];
+        let index = dictionary[buffer.as_slice()];
         let pair = Pair { index, symbol: None };
         writer.write_all(&pair.encode()).unwrap();
     }
