@@ -1,7 +1,4 @@
-use std::{fs::File, io::{BufRead, BufReader, Read}};
-
-use anyhow::Error;
-use rand::random;
+use std::{io::{BufReader, Read}};
 
 use crate::bit_traits::BitReadable;
 

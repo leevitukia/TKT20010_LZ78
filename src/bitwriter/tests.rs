@@ -1,8 +1,3 @@
-use std::io::Cursor;
-
-use super::*;
-
-use rand::Rng;
 
 #[test]
 fn write_10_bits() {

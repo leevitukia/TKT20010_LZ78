@@ -1,8 +1,4 @@
-use std::{io::Cursor, ptr::read};
-
-use super::*;
-
-use rand::Rng;
+use std::{io::Cursor};
 
 #[test]
 fn read_10_bits() {

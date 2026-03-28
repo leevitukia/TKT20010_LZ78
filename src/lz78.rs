@@ -1,57 +1,73 @@
-use std::{fs::File, io::{BufReader, BufWriter, Read, Write}, path::Path};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 use ahash::AHashMap;
 
-struct Pair {
+use crate::{bit_traits::{BitReadable, BitWritable}, bitreader::BitReader, bitwriter::BitWriter};
+
+#[derive(Debug, Clone)]
+pub struct Pair {
     /// The index of the longest matching prefix in the dictionary
     index: u64,
     /// The symbol that broke the buffer, only None if the last buffer was in the dictionary
     symbol: Option<u8>,
 }
 
-const U8MAX: u64 = 2_u64.pow(8);
-const U16MAX: u64 = 2_u64.pow(16);
-const U32MAX: u64 = 2_u64.pow(32);
-
 impl Pair {
-    fn new(index: u64, symbol: Option<u8>) -> Self {
+    pub fn new(index: u64, symbol: Option<u8>) -> Self {
         Self {index, symbol}
     }
-
-    /// Encodes the pair to a form where it can be written to file in a somewhat compressed form
-    fn encode(&self) -> Vec<u8> {
-        let bit_count: u8 = match self.index {
-            0..U8MAX => 8,
-            U8MAX..U16MAX => 16,
-            U16MAX..U32MAX => 32,
-            U32MAX..=u64::MAX => 64,
-        };
-        let mut encoded_bytes = Vec::with_capacity((bit_count / 8 + 2) as usize);
-        encoded_bytes.push(bit_count);
-
-        let bytes = match self.index {
-            0..U8MAX => (self.index as u8).to_be_bytes().to_vec(),
-            U8MAX..U16MAX => (self.index as u16).to_be_bytes().to_vec(),
-            U16MAX..U32MAX => (self.index as u32).to_be_bytes().to_vec(),
-            U32MAX..=u64::MAX => self.index.to_be_bytes().to_vec(),
-        };
-
-        encoded_bytes.extend(bytes);
-
-        if let Some(byte) = self.symbol {
-            encoded_bytes.push(byte);
+}
+impl BitWritable for Pair {
+    fn write<W: Write>(&self, writer: &mut BitWriter<W>) -> anyhow::Result<()> {
+        writer.write_bits_with_continuation_bit(writer.default_chunk_size, self.index)?;
+        //println!("Wrote: {}", self.index);
+        if let Some(symbol) = self.symbol {
+            writer.write(&true)?;
+            writer.write_bits(8, symbol as u64)?;
         }
-        encoded_bytes
+        else {
+            writer.write(&false)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl BitReadable for Pair {
+    fn read<R: Read>(reader: &mut BitReader<R>) -> anyhow::Result<Self> {
+        let index = reader.read_bits_with_continuation_bit(reader.default_chunk_size)?;
+        let mut symbol = None;
+        if reader.read::<bool>()? {
+            symbol = Some(reader.read_bits(8)? as u8);
+        }
+        return Ok(Pair::new(index, symbol));
+    }
+}
+
+fn chunk_size_heuristic(bytes: u64) -> u32 {
+    if bytes < 2 {
+        return 1;
+    }
+    else {
+        let bits = bytes.ilog2() + 1;
+        return (bits as f64 / 4.5 * 2.0) as _; // replace with something smart
     }
 }
 
 /// This method takes the input file and saves a version compressed with the LZ78 algorithm to the output path
-pub fn encode(input: &Path, output: &Path) {
-    let input_file = File::open(input).unwrap();
-    let reader = BufReader::new(input_file);
+pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()> {
+    let len = input.seek(SeekFrom::End(0))?;
+    input.seek(SeekFrom::Start(0))?;
 
-    let output_file = File::create(output).unwrap();
-    let mut writer = BufWriter::new(output_file);
+    let optimal_chunk_size: u32 = chunk_size_heuristic(len);
+
+    let reader = BufReader::new(input);
+    let mut writer = BitWriter::new(output, Some(optimal_chunk_size));
+    if len == 0 {
+        writer.flush()?; //empty file
+        return Ok(())
+    }
+    writer.write_bits(6, optimal_chunk_size as u64)?;
 
     let mut dictionary: AHashMap<Box<[u8]>, u64> = AHashMap::new();
     let mut buffer: Vec<u8> = Vec::new();
@@ -66,65 +82,54 @@ pub fn encode(input: &Path, output: &Path) {
             dictionary.insert(buffer.clone().into_boxed_slice(), index);
             buffer.clear();
             let pair = Pair {index: prev_index, symbol: Some(b)};
-            writer.write_all(&pair.encode()).unwrap();
+            writer.write(&pair)?;
         }
     }
 
     if buffer.len() > 0 { //EOF
         let index = dictionary[buffer.as_slice()];
         let pair = Pair { index, symbol: None };
-        writer.write_all(&pair.encode()).unwrap();
+        writer.write(&pair)?;
     }
 
-    writer.flush().unwrap();
+    Ok(writer.flush()?)
 }
 
 /// This method takes a file that was compressed with the LZ78 algorithm and decodes it to the output path
-pub fn decode(input: &Path, output: &Path) {
-    let input_file = File::open(input).unwrap();
-    let mut reader = BufReader::new(input_file);
+pub fn decode<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
+    let mut reader = BitReader::new(input, None);
 
-    let output_file = File::create(output).unwrap();
-    let mut writer = BufWriter::new(output_file);
-
+    if let Ok(chunk_size ) = reader.read_bits(6){
+        reader.default_chunk_size = chunk_size as u32;
+    }
+    else {
+        return Ok(())
+    };
+    
+    let mut writer = BufWriter::new(output);
     let mut dictionary: Vec<Vec<u8>> = Vec::new();
 
     loop {
-        let mut buf = [0u8; 1];
-        if let Err(_) = reader.read_exact(&mut buf) {
+        if let Ok(pair) = reader.read::<Pair>() {
+            let mut buffer = Vec::new();
+            if pair.index > 0 {
+                buffer.extend(&dictionary[pair.index as usize - 1]);
+            }
+
+            if let Some(symbol) = pair.symbol {
+                buffer.push(symbol);
+            }
+            writer.write_all(&buffer)?;
+
+            dictionary.push(buffer);
+        }
+        else {
             break;
-        };
-        let bit_count = buf[0];
-        let mut buf = vec![0u8; (bit_count / 8) as usize];
-        reader.read_exact(&mut buf).expect("Failed to read the bit count header");
-
-        let index = match bit_count {  //
-            8 => u8::from_be_bytes(buf[..].try_into().unwrap()) as u64,
-            16 => u16::from_be_bytes(buf[..].try_into().unwrap()) as u64,
-            32 => u32::from_be_bytes(buf[..].try_into().unwrap()) as u64,
-            64 => u64::from_be_bytes(buf[..].try_into().unwrap()),
-            _ => panic!("Something went horribly wrong {}", bit_count),
-        };
-
-        let mut buf = [0u8; 1];
-        let symbol = if let Ok(_) = reader.read_exact(&mut buf) { Some(buf[0]) } else { None };
-
-        let mut buffer = Vec::new();
-        if index > 0 {
-            buffer.extend(&dictionary[index as usize - 1]);
         }
-        
-        if let Some(symbol) = symbol {
-            buffer.push(symbol);
-        }
-
-        writer.write_all(&buffer).expect("Failed to write buffer to file");
-
-        dictionary.push(buffer);
     }
 
-    writer.flush().expect("Failed to finish writing the output file");
-
+    writer.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]
