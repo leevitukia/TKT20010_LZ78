@@ -1,4 +1,4 @@
-use std::{cmp::{Ordering, Reverse}, collections::BinaryHeap, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}};
+use std::{cmp::{Ordering, Reverse}, collections::BinaryHeap, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}, path::MAIN_SEPARATOR};
 use ahash::AHashMap;
 
 use crate::{bitreader::BitReader, bitwriter::BitWriter};
@@ -72,7 +72,7 @@ fn build_tree(frequencies: &mut AHashMap<u8, usize>) -> AHashMap<u8, Vec<bool>>{
 
 pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()> {
     let reader = BufReader::new(&mut input);
-    let mut frequencies: AHashMap<u8, usize> = AHashMap::with_capacity(256);
+    let mut frequencies: AHashMap<u8, usize> = (0..=255).into_iter().map(|i| (i, 0)).collect();
 
     for byte in reader.bytes(){
         let b = byte.expect("Failed to read a byte for some reason");
@@ -81,11 +81,26 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
 
     let codes = build_tree(&mut frequencies);
 
+    // write frequencies so that the decoder can rebuild the tree
+    let optimal_chunk_size = (4..=63).min_by_key(|c| { // brute force the optimal chunk size
+        let mut bits_written = 0;
+        for i in 0..=255 {
+            let mut bits_remaining = frequencies[&i].max(1).ilog2() + 1;
+            
+            while bits_remaining != 0 {
+                bits_written += c + 1;
+                bits_remaining = bits_remaining.saturating_sub(*c);
+            }
+        };
+        bits_written
+    }).unwrap_or(32);
+
     let mut writer = BitWriter::new(output, None);
 
-    // write frequencies so that the decoder can rebuild the tree
+    writer.write_bits(6, optimal_chunk_size as u64)?;
+
     for i in 0..=255 {
-        writer.write_bits_with_continuation_bit(32, frequencies[&i] as u64)?;
+        writer.write_bits_with_continuation_bit(optimal_chunk_size, frequencies[&i] as u64)?;
     }
 
     input.seek(SeekFrom::Start(0))?;
@@ -105,10 +120,12 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
 
 pub fn decode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()>{
     let mut reader = BitReader::new(&mut input, None);
-    let mut frequencies: AHashMap<u8, usize> = AHashMap::with_capacity(256);
+    let mut frequencies: AHashMap<u8, usize> = (0..=255).into_iter().map(|i| (i, 0)).collect();
+
+    let chunk_size = reader.read_bits(6)?;
 
     for i in 0..=255 {
-        frequencies.insert(i, reader.read_bits_with_continuation_bit(32)? as usize);
+        frequencies.insert(i, reader.read_bits_with_continuation_bit(chunk_size as _)? as usize);
     }
 
     let codes = build_tree(&mut frequencies);
