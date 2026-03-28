@@ -40,17 +40,17 @@ impl BitReadable for Pair {
         if reader.read::<bool>()? {
             symbol = Some(reader.read_bits(8)? as u8);
         }
-        return Ok(Pair::new(index, symbol));
+        Ok(Pair::new(index, symbol))
     }
 }
 
 fn chunk_size_heuristic(bytes: u64) -> u32 {
     if bytes < 2 {
-        return 1;
+        1
     }
     else {
         let bits = bytes.ilog2() + 1;
-        return (bits as f64 / 4.5 * 2.0) as _; // replace with something smart
+        (bits as f64 / 4.5 * 2.0) as _// replace with something smart
     }
 }
 
@@ -75,7 +75,7 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
 
     for byte in reader.bytes() {
         let b = byte.unwrap();
-        let prev_index = if buffer.len() > 0 {dictionary[buffer.as_slice()]} else {0};
+        let prev_index = if !buffer.is_empty() {dictionary[buffer.as_slice()]} else {0};
         buffer.push(b);
         if !dictionary.contains_key(buffer.as_slice()) {
             index += 1;
@@ -86,13 +86,13 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
         }
     }
 
-    if buffer.len() > 0 { //EOF
+    if !buffer.is_empty() { //EOF
         let index = dictionary[buffer.as_slice()];
         let pair = Pair { index, symbol: None };
         writer.write(&pair)?;
     }
 
-    Ok(writer.flush()?)
+    writer.flush()
 }
 
 /// This method takes a file that was compressed with the LZ78 algorithm and decodes it to the output path
@@ -109,25 +109,20 @@ pub fn decode<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
     let mut writer = BufWriter::new(output);
     let mut dictionary: Vec<Vec<u8>> = Vec::new();
 
-    loop {
-        if let Ok(pair) = reader.read::<Pair>() {
-            let mut buffer = Vec::new();
-            if pair.index > 0 {
-                buffer.extend(&dictionary[pair.index as usize - 1]);
-            }
-
-            if let Some(symbol) = pair.symbol {
-                buffer.push(symbol);
-            }
-            writer.write_all(&buffer)?;
-
-            dictionary.push(buffer);
+    while let Ok(pair) = reader.read::<Pair>() {
+        let mut buffer = Vec::new();
+        if pair.index > 0 {
+            buffer.extend(&dictionary[pair.index as usize - 1]);
         }
-        else {
-            break;
+
+        if let Some(symbol) = pair.symbol {
+            buffer.push(symbol);
         }
+        writer.write_all(&buffer)?;
+
+        dictionary.push(buffer);
     }
-
+    
     writer.flush()?;
     Ok(())
 }

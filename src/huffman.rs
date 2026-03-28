@@ -1,4 +1,4 @@
-use std::{cmp::{Ordering, Reverse}, collections::BinaryHeap, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}, path::MAIN_SEPARATOR};
+use std::{cmp::{Ordering, Reverse}, collections::BinaryHeap, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}};
 use ahash::AHashMap;
 
 use crate::{bitreader::BitReader, bitwriter::BitWriter};
@@ -72,7 +72,7 @@ fn build_tree(frequencies: &mut AHashMap<u8, usize>) -> AHashMap<u8, Vec<bool>>{
 
 pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()> {
     let reader = BufReader::new(&mut input);
-    let mut frequencies: AHashMap<u8, usize> = (0..=255).into_iter().map(|i| (i, 0)).collect();
+    let mut frequencies: AHashMap<u8, usize> = (0..=255).map(|i| (i, 0)).collect();
 
     for byte in reader.bytes(){
         let b = byte.expect("Failed to read a byte for some reason");
@@ -120,7 +120,7 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
 
 pub fn decode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()>{
     let mut reader = BitReader::new(&mut input, None);
-    let mut frequencies: AHashMap<u8, usize> = (0..=255).into_iter().map(|i| (i, 0)).collect();
+    let mut frequencies: AHashMap<u8, usize> = (0..=255).map(|i| (i, 0)).collect();
 
     let chunk_size = reader.read_bits(6)?;
 
@@ -135,19 +135,16 @@ pub fn decode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
     let mut prefix: Vec<bool> = Vec::new();
 
     let mut writer = BufWriter::new(output);
-    loop {
-        if let Ok(bit) = reader.read::<bool>() {
-            prefix.push(bit);
 
-            if let Some(symbol) = prefix_to_symbol.get(&prefix) {
-                writer.write_all(&[*symbol])?;
-                prefix.clear();
-            }
-        }
-        else {
-            break;
+    while let Ok(bit) = reader.read::<bool>() {
+        prefix.push(bit);
+
+        if let Some(symbol) = prefix_to_symbol.get(&prefix) {
+            writer.write_all(&[*symbol])?;
+            prefix.clear();
         }
     }
+
     writer.flush()?;
     Ok(())
 }

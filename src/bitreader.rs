@@ -42,7 +42,7 @@ impl<R: Read> BitReader<R> {
                 (&mut self.reader).take(8).read_to_end(&mut buf)?;
 
                 if buf.len() < 8 {
-                    if buf.len() == 0{
+                    if buf.is_empty(){
                         anyhow::bail!("EOF");
                     }
                     buf.resize(8, 0);
@@ -65,7 +65,7 @@ impl<R: Read> BitReader<R> {
             self.bits_read += bits_to_read as u64;
         }
 
-        return Ok(value);
+        Ok(value)
     }
 
     pub fn read_bits_with_continuation_bit(&mut self, data_bits_per_chunk: u32) -> anyhow::Result<u64> {

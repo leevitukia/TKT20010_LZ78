@@ -53,7 +53,7 @@ impl<W: Write> BitWriter<W> {
 
         while bits_remaining > 0 {
             let bit_pos = (self.bits_written % 8) as u32;
-            let bits_to_write = (u8::BITS as u32 - bit_pos).min(bits_remaining);
+            let bits_to_write = (u8::BITS - bit_pos).min(bits_remaining);
 
             let offset = bits - bits_remaining;
             let mask: u64 = ((1 << bits_to_write) - 1) << offset;
@@ -66,7 +66,7 @@ impl<W: Write> BitWriter<W> {
             bits_remaining -= bits_to_write;
             self.bits_written += bits_to_write as u64;
 
-            if self.bits_written % 8 == 0 {
+            if self.bits_written.is_multiple_of(8) {
                 self.writer.write_all(&[self.buffer])?;
                 self.buffer = 0;
             }
@@ -110,7 +110,7 @@ impl<W: Write> BitWriter<W> {
     }
 
     pub fn flush(&mut self) -> anyhow::Result<()> {
-        if self.bits_written % 8 != 0 {
+        if !self.bits_written.is_multiple_of(8) {
             self.writer.write_all(&[self.buffer])?;
             self.buffer = 0;
         }
