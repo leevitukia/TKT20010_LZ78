@@ -7,7 +7,7 @@ pub trait BitWritable {
 }
 
 pub trait BitReadable: Sized {
-    fn read<R: Read>(reader: &mut BitReader<R>) -> Self;
+    fn read<R: Read>(reader: &mut BitReader<R>) -> anyhow::Result<Self>;
 }
 
 impl BitWritable for bool {
@@ -17,8 +17,8 @@ impl BitWritable for bool {
 }
 
 impl BitReadable for bool {
-    fn read<R: Read>(reader: &mut BitReader<R>) -> Self {
-        reader.read_bits(1) == 1
+    fn read<R: Read>(reader: &mut BitReader<R>) -> anyhow::Result<Self> {
+        Ok(reader.read_bits(1)? == 1)
     }
 }
 
