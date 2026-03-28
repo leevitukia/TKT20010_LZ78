@@ -5,12 +5,12 @@ use crate::{bitreader::BitReader, bitwriter::BitWriter};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Node {
-    Leaf { symbol: u8, freq: usize },
-    Internal { freq: usize, left: Box<Node>, right: Box<Node> },
+    Leaf { symbol: u8, freq: u64 },
+    Internal { freq: u64, left: Box<Node>, right: Box<Node> },
 }
 
 impl Node {
-    fn freq(&self) -> usize {
+    fn freq(&self) -> u64 {
         match self {
             Node::Leaf { freq, .. } => *freq,
             Node::Internal { freq, .. } => *freq,
@@ -45,11 +45,13 @@ fn build_codes(node: &Node, prefix: Vec<bool>, codes: &mut AHashMap<u8, Vec<bool
     }
 }
 
-fn build_tree(frequencies: &mut AHashMap<u8, usize>) -> AHashMap<u8, Vec<bool>>{
+fn build_tree(frequencies: &mut AHashMap<u8, u64>) -> AHashMap<u8, Vec<bool>>{
     let mut prio_queue = BinaryHeap::with_capacity(frequencies.len());
+    let mut sorted_freqs: Vec<(u8, u64)> = frequencies.iter().map(|f|(*f.0, *f.1)).collect();
+    sorted_freqs.sort();
 
-    for kvp in frequencies{
-        prio_queue.push(Reverse(Node::Leaf { symbol: *kvp.0, freq: *kvp.1 }));
+    for kvp in sorted_freqs{
+        prio_queue.push(Reverse(Node::Leaf { symbol: kvp.0, freq: kvp.1 }));
     }
 
     while prio_queue.len() > 1 { // combines the 2 least common nodes until there's a single root node
@@ -72,11 +74,15 @@ fn build_tree(frequencies: &mut AHashMap<u8, usize>) -> AHashMap<u8, Vec<bool>>{
 
 pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()> {
     let reader = BufReader::new(&mut input);
-    let mut frequencies: AHashMap<u8, usize> = (0..=255).map(|i| (i, 0)).collect();
+    let mut frequencies: AHashMap<u8, u64> = (0..=255).map(|i| (i, 0)).collect();
 
     for byte in reader.bytes(){
         let b = byte.expect("Failed to read a byte for some reason");
         *frequencies.entry(b).or_insert(0) += 1;
+    }
+    
+    if frequencies.iter().map(|f| *f.1).sum::<u64>() == 0 {
+        return Ok(())
     }
 
     let codes = build_tree(&mut frequencies);
@@ -116,16 +122,14 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
     Ok(())
 }
 
-
-
-pub fn decode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()>{
+pub fn decode<R: Read, W: Write>(mut input: R, output: W) -> anyhow::Result<()>{
     let mut reader = BitReader::new(&mut input, None);
-    let mut frequencies: AHashMap<u8, usize> = (0..=255).map(|i| (i, 0)).collect();
+    let mut frequencies: AHashMap<u8, u64> = (0..=255).map(|i| (i, 0)).collect();
 
     let chunk_size = reader.read_bits(6)?;
 
     for i in 0..=255 {
-        frequencies.insert(i, reader.read_bits_with_continuation_bit(chunk_size as _)? as usize);
+        frequencies.insert(i, reader.read_bits_with_continuation_bit(chunk_size as _)? as _);
     }
 
     let codes = build_tree(&mut frequencies);
@@ -136,15 +140,22 @@ pub fn decode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
 
     let mut writer = BufWriter::new(output);
 
-    while let Ok(bit) = reader.read::<bool>() {
+    let total_symbols = frequencies.iter().map(|f|*f.1).sum::<u64>();
+
+    let mut symbols_written = 0;
+    while let Ok(bit) = reader.read::<bool>() && symbols_written < total_symbols {
         prefix.push(bit);
 
         if let Some(symbol) = prefix_to_symbol.get(&prefix) {
             writer.write_all(&[*symbol])?;
             prefix.clear();
+            symbols_written += 1;
         }
     }
 
     writer.flush()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
