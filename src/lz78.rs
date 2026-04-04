@@ -1,6 +1,4 @@
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-
-use ahash::AHashMap;
+use std::{io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}};
 
 use crate::{bit_traits::{BitReadable, BitWritable}, bitreader::BitReader, bitwriter::BitWriter};
 
@@ -17,9 +15,10 @@ impl Pair {
         Self {index, symbol}
     }
 }
+
 impl BitWritable for Pair {
     fn write<W: Write>(&self, writer: &mut BitWriter<W>) -> anyhow::Result<()> {
-        writer.write_bits_with_continuation_bit(writer.default_chunk_size, self.index)?;
+        writer.write_bits_with_continuation_bit(writer.default_chunk_size, self.index as u64)?;
         //println!("Wrote: {}", self.index);
         if let Some(symbol) = self.symbol {
             writer.write(&true)?;
@@ -44,7 +43,7 @@ impl BitReadable for Pair {
     }
 }
 
-fn chunk_size_heuristic(bytes: u64) -> u32 {
+/* fn chunk_size_heuristic(bytes: u64) -> u32 {
     if bytes < 2 {
         1
     }
@@ -52,16 +51,28 @@ fn chunk_size_heuristic(bytes: u64) -> u32 {
         let bits = bytes.ilog2() + 1;
         (bits as f64 / 4.5 * 2.0) as _// replace with something smart
     }
+} */
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TrieNode {
+    pub children: [u64; 256],
+    pub index: u64,
 }
 
-/// This method takes the input file and saves a version compressed with the LZ78 algorithm to the output path
+const MAX_DICT_SIZE: usize = 1 << 20;
+
+/// Takes the input and writes an LZ78 encoded version to the output
+/// * `input` - Any readable & seekable type, such as a File or a byte vector wrapped in a Cursor
+/// * `output` - Any writable type, such as a File or a byte vector
 pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()> {
     let len = input.seek(SeekFrom::End(0))?;
     input.seek(SeekFrom::Start(0))?;
 
-    let optimal_chunk_size: u32 = chunk_size_heuristic(len);
+    //let optimal_chunk_size: u32 = chunk_size_heuristic(len);
 
-    let reader = BufReader::new(input);
+    let optimal_chunk_size: u32 = ((MAX_DICT_SIZE.ilog2() + 1) as f64 / 4.5 * 2.0) as u32;
+
+    let mut reader = BufReader::new(input);
     let mut writer = BitWriter::new(output, Some(optimal_chunk_size));
     if len == 0 {
         writer.flush()?; //empty file
@@ -69,33 +80,58 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
     }
     writer.write_bits(6, optimal_chunk_size as u64)?;
 
-    let mut dictionary: AHashMap<Box<[u8]>, u64> = AHashMap::new();
-    let mut buffer: Vec<u8> = Vec::new();
-    let mut index: u64 = 0;
+    //let mut dictionary: HashMap<Box<[u8]>, u64> = HashMap::new();
+    //let mut buffer: Vec<u8> = Vec::new();
+    //let mut index: u64 = 0;
 
-    for byte in reader.bytes() {
-        let b = byte.unwrap();
-        let prev_index = if !buffer.is_empty() {dictionary[buffer.as_slice()]} else {0};
-        buffer.push(b);
-        if !dictionary.contains_key(buffer.as_slice()) {
-            index += 1;
-            dictionary.insert(buffer.clone().into_boxed_slice(), index);
-            buffer.clear();
-            let pair = Pair {index: prev_index, symbol: Some(b)};
-            writer.write(&pair)?;
+    let mut nodes: Vec<TrieNode> = vec![TrieNode { children: [0;256], index: 0 }];
+    let mut curr_index = 0;
+    let mut prev_index = 0;
+    let mut index = 0;
+
+    let mut byte_buffer = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut byte_buffer)?;
+        if n == 0 {
+            break;
+        }
+        for b in &byte_buffer[..n] {
+            if nodes[curr_index].children[*b as usize] != 0 {
+                curr_index = nodes[curr_index].children[*b as usize] as usize;
+                prev_index = nodes[curr_index].index;
+            } else {
+                index += 1;
+                let next_index = nodes.len() as u64;
+                nodes[curr_index].children[*b as usize] = next_index;
+                //nodes[curr_index].children.insert(*b, next_index);
+                nodes.push(TrieNode { children: [0;256], index });
+                curr_index = 0;
+
+                let pair = Pair { index: prev_index, symbol: Some(*b) };
+                writer.write(&pair)?;
+                prev_index = 0;
+
+                if nodes.len() >= MAX_DICT_SIZE { //dictionary reset
+                    nodes.clear();
+                    nodes.push(TrieNode { children: [0;256], index: 0 });
+                    index = 0;
+                    prev_index = 0;
+                }
+            }
         }
     }
 
-    if !buffer.is_empty() { //EOF
-        let index = dictionary[buffer.as_slice()];
-        let pair = Pair { index, symbol: None };
+    if curr_index != 0 {
+        let pair = Pair { index: prev_index, symbol: None };
         writer.write(&pair)?;
     }
 
     writer.flush()
 }
 
-/// This method takes a file that was compressed with the LZ78 algorithm and decodes it to the output path
+/// Takes the input and writes the decoded version to the output
+/// * `input` - Any readable & seekable type, such as a File or a byte vector wrapped in a Cursor
+/// * `output` - Any writable type, such as a File or a byte vector
 pub fn decode<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
     let mut reader = BitReader::new(input, None);
 
@@ -121,6 +157,10 @@ pub fn decode<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
         writer.write_all(&buffer)?;
 
         dictionary.push(buffer);
+
+        if dictionary.len() >= MAX_DICT_SIZE - 1 { //dictionary reset
+            dictionary.clear();
+        }
     }
     
     writer.flush()?;

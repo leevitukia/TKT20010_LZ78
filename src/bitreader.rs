@@ -11,7 +11,6 @@ pub struct BitReader<R: Read> {
     pub default_chunk_size: u32
 }
 
-
 impl<R: Read> BitReader<R> {
     pub fn read<T: BitReadable>(&mut self) -> anyhow::Result<T> {
         T::read(self)

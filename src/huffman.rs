@@ -1,5 +1,4 @@
-use std::{cmp::{Ordering, Reverse}, collections::BinaryHeap, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}};
-use ahash::AHashMap;
+use std::{cmp::{Ordering, Reverse}, collections::{BinaryHeap, HashMap}, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}};
 
 use crate::{bitreader::BitReader, bitwriter::BitWriter};
 
@@ -30,7 +29,7 @@ impl PartialOrd for Node {
     }
 }
 
-fn build_codes(node: &Node, prefix: Vec<bool>, codes: &mut AHashMap<u8, Vec<bool>>) {
+fn build_codes(node: &Node, prefix: Vec<bool>, codes: &mut HashMap<u8, Vec<bool>>) {
     match node {
         Node::Leaf { symbol, .. } => { codes.insert(*symbol, prefix); }
         Node::Internal { left, right, .. } => {
@@ -45,7 +44,7 @@ fn build_codes(node: &Node, prefix: Vec<bool>, codes: &mut AHashMap<u8, Vec<bool
     }
 }
 
-fn build_tree(frequencies: &mut AHashMap<u8, u64>) -> AHashMap<u8, Vec<bool>>{
+fn build_tree(frequencies: &mut HashMap<u8, u64>) -> HashMap<u8, Vec<bool>>{
     let mut prio_queue = BinaryHeap::with_capacity(frequencies.len());
     let mut sorted_freqs: Vec<(u8, u64)> = frequencies.iter().map(|f|(*f.0, *f.1)).collect();
     sorted_freqs.sort();
@@ -65,16 +64,20 @@ fn build_tree(frequencies: &mut AHashMap<u8, u64>) -> AHashMap<u8, Vec<bool>>{
 
     let root = prio_queue.pop().unwrap().0;
     
-    let mut codes: AHashMap<u8, Vec<bool>> = AHashMap::new();
+    let mut codes: HashMap<u8, Vec<bool>> = HashMap::new();
 
     build_codes(&root, Vec::new(), &mut codes);
 
     codes
 }
 
+
+/// Takes the input and writes a Huffman encoded version to the output
+/// * `input` - Any readable & seekable type, such as a File or a byte vector wrapped in a Cursor
+/// * `output` - Any writable type, such as a File or a byte vector
 pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Result<()> {
     let reader = BufReader::new(&mut input);
-    let mut frequencies: AHashMap<u8, u64> = (0..=255).map(|i| (i, 0)).collect();
+    let mut frequencies: HashMap<u8, u64> = (0..=255).map(|i| (i, 0)).collect();
 
     for byte in reader.bytes(){
         let b = byte.expect("Failed to read a byte for some reason");
@@ -122,9 +125,13 @@ pub fn encode<R: Read + Seek, W: Write>(mut input: R, output: W) -> anyhow::Resu
     Ok(())
 }
 
+
+/// Takes the input and writes the decoded version to the output
+/// * `input` - Any readable & seekable type, such as a File or a byte vector wrapped in a Cursor
+/// * `output` - Any writable type, such as a File or a byte vector
 pub fn decode<R: Read, W: Write>(mut input: R, output: W) -> anyhow::Result<()>{
     let mut reader = BitReader::new(&mut input, None);
-    let mut frequencies: AHashMap<u8, u64> = (0..=255).map(|i| (i, 0)).collect();
+    let mut frequencies: HashMap<u8, u64> = (0..=255).map(|i| (i, 0)).collect();
 
     let chunk_size = reader.read_bits(6)?;
 
@@ -134,7 +141,7 @@ pub fn decode<R: Read, W: Write>(mut input: R, output: W) -> anyhow::Result<()>{
 
     let codes = build_tree(&mut frequencies);
 
-    let prefix_to_symbol: AHashMap<Vec<bool>, u8> = codes.iter().map(|(k, v)| (v.clone(), *k)).collect();
+    let prefix_to_symbol: HashMap<Vec<bool>, u8> = codes.iter().map(|(k, v)| (v.clone(), *k)).collect();
 
     let mut prefix: Vec<bool> = Vec::new();
 

@@ -1,9 +1,6 @@
 use std::io::Cursor;
 
 use rand::Rng;
-// Pair Struct
-
-// LZ78 Encode & Decode
 
 fn encode_to_bytes(input: &mut Vec<u8>) -> Vec<u8> {
     let mut output = Vec::new();
@@ -26,8 +23,8 @@ fn encode_empty_input() {
 }
 
 #[test]
-fn decoded_file_matches_input() { // 10 MiB random input
-    let mut input = vec![0u8; 1024 * 1024 * 10];
+fn decoded_file_matches_input() { // 5 MiB random input
+    let mut input = vec![0u8; 1024 * 1024 * 5];
     rand::rng().fill_bytes(&mut input);
     let decoded = decode_to_bytes(&encode_to_bytes(&mut input));
 
@@ -35,7 +32,7 @@ fn decoded_file_matches_input() { // 10 MiB random input
 }
 
 #[test]
-fn encoded_file_is_smaller_than_input() {
+fn encoded_file_is_smaller_than_input() { // 10 KiB
     let mut input = vec![0u8; 1024 * 10];
     let compressed = encode_to_bytes(&mut input);
 

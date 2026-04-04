@@ -42,12 +42,11 @@ enum Commands {
 
 fn main() {
     let args = CliOptions::parse();
+    let input_file = File::open(&args.input_file).unwrap();
+    let output_file = File::create(&args.output_file).unwrap();
 
-    let input_file = File::open(args.input_file).unwrap();
-    let output_file = File::create(args.output_file).unwrap();
 
-
-    match args.command {
+    match &args.command {
         Commands::Encode(e) => {
             match e.algorithm {
                 Algorithm::LZ78 => lz78::encode(input_file, output_file).expect("Failed to encode LZ78 file"),
